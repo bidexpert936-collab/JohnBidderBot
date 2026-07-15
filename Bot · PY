@@ -1,0 +1,154 @@
+import os
+import io
+import logging
+
+from PIL import Image
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters,
+)
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+
+# Formats we offer as conversion targets
+SUPPORTED_FORMATS = ["PNG", "JPEG", "WEBP", "BMP", "GIF", "ICO"]
+
+# Telegram callback_data has a 64-byte limit, so keep it short.
+# We store the pending image bytes per-user in memory (chat_data).
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "👋 Send me an image (as a photo or a file) and I'll convert it "
+        "to any format you choose — JPG, PNG, WEBP, BMP, GIF, or ICO.\n\n"
+        "Just send a picture to get started."
+    )
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "Just send me a photo or an image file. I'll ask which format "
+        "you want it converted to, then send back the converted file."
+    )
+
+
+async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles both compressed photos and uncompressed image documents."""
+    file_obj = None
+    original_name = "image"
+
+    if update.message.photo:
+        file_obj = await update.message.photo[-1].get_file()
+    elif update.message.document and update.message.document.mime_type and \
+            update.message.document.mime_type.startswith("image/"):
+        file_obj = await update.message.document.get_file()
+        original_name = update.message.document.file_name or "image"
+    else:
+        await update.message.reply_text(
+            "That doesn't look like an image. Please send a photo or an image file."
+        )
+        return
+
+    image_bytes = await file_obj.download_as_bytearray()
+
+    # Stash the raw bytes for this user so the callback can retrieve them
+    context.user_data["pending_image"] = bytes(image_bytes)
+    context.user_data["pending_name"] = os.path.splitext(original_name)[0]
+
+    keyboard = [
+        InlineKeyboardButton(fmt, callback_data=f"conv:{fmt}")
+        for fmt in SUPPORTED_FORMATS
+    ]
+    # Arrange 3 buttons per row
+    rows = [keyboard[i:i + 3] for i in range(0, len(keyboard), 3)]
+    reply_markup = InlineKeyboardMarkup(rows)
+
+    await update.message.reply_text(
+        "Which format do you want to convert it to?",
+        reply_markup=reply_markup,
+    )
+
+
+async def handle_conversion_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    target_format = query.data.split(":", 1)[1]
+    image_bytes = context.user_data.get("pending_image")
+    base_name = context.user_data.get("pending_name", "image")
+
+    if not image_bytes:
+        await query.edit_message_text(
+            "I couldn't find that image anymore — please send it again."
+        )
+        return
+
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+
+        # Formats like JPEG/BMP/ICO don't support transparency (RGBA) well.
+        if target_format in ("JPEG", "BMP") and img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+
+        output_buffer = io.BytesIO()
+        save_kwargs = {}
+        if target_format == "ICO":
+            save_kwargs["sizes"] = [(256, 256)]
+
+        img.save(output_buffer, format=target_format, **save_kwargs)
+        output_buffer.seek(0)
+
+        ext = "jpg" if target_format == "JPEG" else target_format.lower()
+        filename = f"{base_name}.{ext}"
+
+        await query.message.reply_document(
+            document=output_buffer,
+            filename=filename,
+            caption=f"✅ Converted to {target_format}",
+        )
+        await query.edit_message_text(f"Converted to {target_format} ✅")
+
+    except Exception as exc:
+        logger.exception("Conversion failed")
+        await query.edit_message_text(f"⚠️ Conversion failed: {exc}")
+
+    finally:
+        context.user_data.pop("pending_image", None)
+        context.user_data.pop("pending_name", None)
+
+
+def main() -> None:
+    if not BOT_TOKEN:
+        raise RuntimeError(
+            "BOT_TOKEN environment variable is not set. "
+            "Get a token from @BotFather and set it before starting the bot."
+        )
+
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(
+        MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_image)
+    )
+    application.add_handler(
+        CallbackQueryHandler(handle_conversion_choice, pattern=r"^conv:")
+    )
+
+    logger.info("Bot starting...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()
