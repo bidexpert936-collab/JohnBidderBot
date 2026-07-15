@@ -1,0 +1,66 @@
+# JohnBidderBot
+
+A Telegram bot that converts images between formats (PNG, JPEG, WEBP, BMP, GIF, ICO).
+
+## How it works
+
+1. Send the bot a photo or an image file.
+2. It replies with format buttons (PNG / JPEG / WEBP / BMP / GIF / ICO).
+3. Tap a format — the bot converts the image and sends it back as a file.
+
+## 1. Create the bot on Telegram
+
+1. Open Telegram, message **@BotFather**.
+2. Send `/newbot`, follow the prompts, and set the username to `JohnBidderBot`
+   (or a variant if that's taken).
+3. BotFather will give you a **token** — copy it, you'll need it below.
+
+## 2. Run locally (optional, for testing)
+
+```bash
+git clone <your-repo-url>
+cd johnbidderbot
+python -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+# edit .env and paste your BOT_TOKEN
+export $(cat .env | xargs)  # or use python-dotenv if you prefer
+python bot.py
+```
+
+## 3. Push to GitHub
+
+```bash
+git init
+git add .
+git commit -m "Initial commit: image conversion bot"
+git branch -M main
+git remote add origin https://github.com/<your-username>/johnbidderbot.git
+git push -u origin main
+```
+
+`.env` is already excluded via `.gitignore` — never commit your real bot token.
+
+## 4. Deploy on Railway
+
+1. Go to [railway.app](https://railway.app) and log in with GitHub.
+2. Click **New Project → Deploy from GitHub repo**, select `johnbidderbot`.
+3. Railway will detect the `Procfile` and `requirements.txt` automatically.
+4. Go to your project's **Variables** tab and add:
+   - `BOT_TOKEN` = the token from BotFather
+5. Under **Settings**, make sure the service is running the `worker` process
+   (Railway usually picks this up from the Procfile automatically).
+6. Deploy. Once it's live, check the **Deployments → Logs** tab — you should
+   see `Bot starting...` with no errors.
+
+## 5. Test it
+
+Open Telegram, search for your bot, hit **Start**, and send it a photo.
+
+## Notes
+
+- Free Railway usage is capped by their trial credit/plan limits — check
+  Railway's current pricing if you plan to run this long-term.
+- The bot uses long polling (`run_polling`), so no public URL or webhook
+  setup is required — it just needs to stay running.
